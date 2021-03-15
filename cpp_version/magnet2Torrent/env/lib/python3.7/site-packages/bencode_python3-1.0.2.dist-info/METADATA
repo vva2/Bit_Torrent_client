@@ -1,0 +1,23 @@
+Metadata-Version: 2.0
+Name: bencode-python3
+Version: 1.0.2
+Summary: Python 3 port for the official bencode library
+Home-page: https://github.com/amyth/bencode
+Author: Amyth Arora
+Author-email: mail@amythsingh.com
+License: GPL3 License
+Platform: UNKNOWN
+Classifier: Development Status :: 5 - Production/Stable
+Classifier: Intended Audience :: Developers
+Classifier: Programming Language :: Python :: 2.6
+Classifier: Programming Language :: Python :: 2.7
+Classifier: Programming Language :: Python :: 3
+Classifier: Programming Language :: Python :: 3.2
+Classifier: Programming Language :: Python :: 3.3
+Classifier: Programming Language :: Python :: 3.4
+Classifier: Programming Language :: Python :: 3.5
+Classifier: Programming Language :: Python :: 3.6
+
+This is the python 3 port for the official bencode (Bitorrent) encoding and decoding library. This project supports both python 2 and python 3.
+
+
