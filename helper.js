@@ -19,24 +19,25 @@ class Helper {
 
     getPeers(torrent, callback) {
         const announceUrl = torrent.announceUrl;
-        const [connReq, transactionId] = buildConnReq();
-        udpSend(connReq, announceUrl);
+        const [connReq, transactionId] = this.buildConnReq();
+        console.log('connection request is: ', connReq);
+        this.udpSend(connReq, announceUrl);
 
         // use transactionId for matching the recieved packet
         // TODO message can come in parts : handle it
         this.socket.on('message', response => {
             console.log("recieved response...");
-            const responseType = respType(response);
+            const responseType = this.respType(response);
             if(responseType === CONNECT) {
                 console.log("recived CONNECT response...");
-                const connResp = parseConnResp(response);
-                const announceReq = buildAnnounceReq(connResp.connectionId, transactionId, torrent);
-                udpSend(announceReq, announceUrl);
+                const connResp = this.parseConnResp(response);
+                const announceReq = this.buildAnnounceReq(connResp.connectionId, transactionId, torrent);
+                this.udpSend(announceReq, announceUrl);
             }
             else if(responseType === ANNOUNCE){
                 console.log("recieved ANNOUNCE response...");
                 // TODO check #seeders == #peers
-                callback(parseAnnounceResp(response).peers);
+                callback(this.parseAnnounceResp(response).peers);
             }
             // TODO handle else condition here
         });

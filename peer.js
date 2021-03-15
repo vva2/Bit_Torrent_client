@@ -14,15 +14,15 @@ class Peer {
         this.busy = false;
         this.BLOCK_LEN = Math.pow(2, 14);
         this.index = -1;  // used for calling continue from writeCallback
-        this.pieces = new Set();
+        this.queue = new Set();
         this.socket = new net.Socket();
-        this.block = {
-            blockIndex: -1,
-            pieceIndex: -1,
-            peerIndex: -1,
-            begin: -1,
-            data: Buffer.alloc(0)
-        };  // piece that is being downloaded
+        
+        // parameters for block
+        this.blockBegin = 0;
+        this.blockIndex = -1;
+        this.pieceIndex = -1;
+        this.downloadedPieceLen = 0;
+
         // TODO update the pieceIndex  and peerIndex before sending it to writeCallback
         this.writeCallback = null;
         this.downloaded = null;
@@ -30,12 +30,13 @@ class Peer {
         this.torrent = null;
     }
 
-    init(torrent, writeCallback, requested, downloaded) {
+    init(torrent, writeCallback, requested, downloaded, torrentThis) {
         this.writeCallback = writeCallback;
         this.torrent = torrent;
         this.requested = requested;
         this.downloaded = downloaded;  // assuming this is always a reference
         this.socket = new net.Socket();
+        this.torrentThis = torrentThis;
         
         this.socket.on('error', console.log);
         this.socket.connect(this.port, this.ip, () => {
@@ -68,58 +69,65 @@ class Peer {
 
         if(pieceIndex === -1) return null;
         this.requested[pieceIndex] = true;
-        this.block['pieceIndex'] = pieceIndex;
-        this.block['data'] = BUffer.alloc(0);
-        this.block['peerIndex'] = this.index;
-        this.block['blockIndex'] = -1;
-        this.block['begin'] = 0;
+        this.pieceIndex = pieceIndex;
+        this.blockIndex = -1;
+        this.blockBegin = 0;
+        this.downloadedPieceLen = 0;
+
         this.busy = true;
         
         this.requestPiece();
     }
 
     blockLength(pieceIndex, blockIndex) {
-        const lastIndex = (this.torrent.size+this.torrent['piece length']-1)/this.torrent['piece length']-1; 
+        const lastIndex = Math.floor((this.torrent.size+this.torrent['piece length']-1)/this.torrent['piece length'])-1; 
         const pieceLen = (lastIndex === pieceIndex)? this.torrent.size-this.torrent['piece length']*lastIndex: this.torrent['piece length'];
-        const lastBlockIndex = ((pieceLen+this.BLOCK_LEN-1)/this.BLOCK_LEN)-1;
+        const lastBlockIndex = Math.floor((pieceLen+this.BLOCK_LEN-1)/this.BLOCK_LEN)-1;
         return (lastBlockIndex === blockIndex)? (pieceLen-(lastBlockIndex*this.BLOCK_LEN)): this.BLOCK_LEN; 
     }
 
     requestPiece() {
-        this.block.blockIndex++;
+        this.blockIndex++;
         this.socket.write(this.buildRequest({
-            index: this.block.pieceIndex,
-            begin: this.block.data.length,
-            length: blockLength(this.block.pieceIndex, this.block.blockIndex)
+            index: this.pieceIndex,
+            begin: this.blockBegin,
+            length: this.blockLength(this.pieceIndex, this.blockIndex)
         }));
     }
 
     msgHandler(msg) {
+        console.log("recieved a msg...", msg);
+
         if(msg.id === HANDSHAKE) this.socket.write(self.buildInterested());
         else if (msg.id === CHOKE) this.chokeHandler();
-        else if (msg.id === UNCHOKE) this.unchokeHandler(pieces);
+        else if (msg.id === UNCHOKE) this.unchokeHandler();
         else if (msg.id === HAVE) this.haveHandler(msg.payload.pieceIndex);
         else if (msg.id === BIT_FIELD) this.bitFieldHandler(msg.payload);
-        else if (msg.id === PIECE) this.pieceHandler(pieces, queue, torrent, file, msg.payload);
+        else if (msg.id === PIECE) this.pieceHandler(msg);
         else if(msg.id === KEEP_ALIVE) this.keepAliveHandler();
         // TODO handle others
     }
+
 
     chokeHandler() {
         this.choked = true;
         this.socket.end();  // TODO think about this
     }
 
+
     unchokeHandler() {
         // call download here
         this.choked = false;
+        console.log("unchoked...");
         this.download();
     }
+
 
     haveHandler(pieceIndex) {
         // adds only unique indices
         this.queue.add(pieceIndex);
     }
+
 
     bitFieldHandler(payload) {
         for(let i = 0;i < payload.length;i++) {
@@ -130,28 +138,42 @@ class Peer {
         }
     }
 
+
     isDone() {
         const lastIndex = (this.torrent.size+this.torrent['piece length']-1)/this.torrent['piece length']-1; 
-        const pieceLen = (lastIndex === this.block.pieceIndex)? this.torrent.size-this.torrent['piece length']*lastIndex: this.torrent['piece length'];
+        const pieceLen = (lastIndex === this.pieceIndex)? this.torrent.size-this.torrent['piece length']*lastIndex: this.torrent['piece length'];
         const lastBlockIndex = ((pieceLen+this.BLOCK_LEN-1)/this.BLOCK_LEN)-1;
-        return this.block.blockIndex === lastBlockIndex;
+        return this.blockIndex === lastBlockIndex;
     }
 
-    pieceHandler() {
+
+    pieceHandler(msg) {
         // request for next block if not downloaded
         // compute block length to request and call buildRequest() 
         // write the built request to socket
         // build offset and call writeCallback
         // change busy = false on when piece downlaod is complete
-        const done = isDone();
+        // update blockOffset, reset block
+
+        const block = {
+            peerIndex: this.index,
+            pieceIndex: msg.payload.index,
+            blockIndex: this.blockIndex,
+            data: msg.payload.block,
+            begin: msg.payload.begin
+        };
+
+        this.blockBegin += msg.payload.block.length;
+        this.downloadedPieceLen += msg.payload.block.length;
+        const done = this.isDone();
 
         if(done) {
             this.busy = false;
-            this.downloaded[this.block.pieceIndex] = true;
-            this.requested[this.block.pieceIndex] = false;
+            this.downloaded[this.pieceIndex] = true;
+            this.requested[this.pieceIndex] = false;
         }
 
-        this.writeCallback(this.block);
+        this.writeCallback(block, this.torrentThis);
         if(done === false) {
             // request next block
             this.requestPiece();
@@ -160,21 +182,26 @@ class Peer {
 
     keepAliveHandler() {
         // TODO close connection after recieving 2-min of keep-alives
+        console.log("keep alive...");
         return null;
     }
 
+
     onWholeMsg() {
+        console.log('onwholemsg...');
+
         let handshake = true;
         let savedBuf = Buffer.alloc(0);
 
         this.socket.on('data', recvBuf => {
+            console.log("recieved data...", recvBuf.length);
             // msgLen calculates the length of a whole message
             const msgLen = () => handshake ? savedBuf.readUInt8(0) + 49 : savedBuf.readInt32BE(0) + 4;
             savedBuf = Buffer.concat([savedBuf, recvBuf]);
-        
+
             // TODO handle keep-alive
             while (savedBuf.length >= 4 && savedBuf.length >= msgLen()) {
-                this.msgHandler(Message(savedBuf.slice(0, msgLen())));
+                this.msgHandler(new Message(savedBuf.slice(0, msgLen())));
                 savedBuf = savedBuf.slice(msgLen());
                 handshake = false;
             }
@@ -182,6 +209,8 @@ class Peer {
     }
 
     buildHandshake() {
+        console.log('build handshake...')
+
         const buf = Buffer.alloc(68);
         // pstrlen
         buf.writeUInt8(19, 0);
@@ -193,7 +222,10 @@ class Peer {
         // info hash
         this.torrent.infoHash.copy(buf, 28);
         // peer id
-        buf.write(util.genId());
+
+        util.genId().copy(buf, 48);
+        
+        console.log('built handshake...');
         return buf;
     }
 

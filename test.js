@@ -1,5 +1,4 @@
-const fs = require('fs');
+const util = require('./util');
 
-if(!fs.existsSync("/a/b/c")) {
-    fs.mkdirSync("a/b/c");
-}
+console.log(util.open(process.argv[2]));
+

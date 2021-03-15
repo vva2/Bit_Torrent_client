@@ -2,7 +2,7 @@
 
 const crypto = require('crypto');
 const fs = require('fs');
-const bencode =  require('bencode');
+const bencode = require('bencode');
 
 const PEER_ID = "-VV0001-";
 

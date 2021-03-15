@@ -6,6 +6,8 @@ const bignum = require('bignum');
 const bencode = require('bencode');
 const {Helper} = require('./helper');
 const {File} = require('./file');
+const Path = require('path');
+
 
 // realtive path, start, end, 
 // TODO can add multiple torrent functionality and priority of torrents
@@ -16,7 +18,7 @@ const {File} = require('./file');
 
 
 class Torrent {
-    constructor(torrent, destinationPath) {
+    constructor(torrent, destinationPath="") {
         this.torrent = torrent;
         this.destinationPath = destinationPath;
         this.torrent.infoHash = this._infoHash();
@@ -30,8 +32,8 @@ class Torrent {
         this.piecesDownloaded = 0;
         this.pieceLength = torrent.info['piece length'];
 
-        this.initFiles();
         console.log(this.torrent);
+        this.initFiles();
     }
 
     _infoHash() {
@@ -48,28 +50,37 @@ class Torrent {
             }
         }
         else 
-            size = torrent.info.length;
+            size = this.torrent.info.length;
 
         return bignum.toBuffer(size, {size: 8});
     }
 
     initFiles() {
+        console.log("initializing files...");
         // TODO check how relative paths are organized in torrent file
         let start = 0;
-        if(this.torrent.files) {
+
+        this.torrent.info.name = this.torrent.info.name.toString('utf8');
+        if(this.torrent.info.files) {
             // create the root directory
             if(!fs.existsSync(this.torrent.info.name)) {
                 fs.mkdirSync(this.torrent.info.name);
             }
 
             this.torrent.info.files.forEach(file => {
-                this.files.push(File(start, start+file.length-1, file.path.toString('utf8')))
+                const filePath = Path.join(this.destinationPath, this.torrent.info.name, file.path[0].toString('utf8'));
+                console.log('filename : ', filePath);
+                this.files.push(new File(start, start+file.length-1, filePath));
                 start += file.length;
             });
         }
         else {
-            this.files.push(File(start, start+this.torrent.info.length-1, file.info.name));
+            const filePath = Path.join(this.destinationPath, this.torrent.info.name);
+            this.files.push(new File(start, start+this.torrent.info.length-1, filePath));
         }
+
+        console.log("inintialized files");
+        console.log(this.files);
     }
 
     start() {
@@ -79,29 +90,29 @@ class Torrent {
             infoHash: this.torrent.infoHash,
             size: this.torrent.size
         }, peers => {
-            console.log("got peers");
+            console.log("got peers size: ", peers);
             // assuming peers are added in the middle of a download
 
             peers.forEach(peer => {
                 peer.index = this.peers.length;
                 this.peers.push(peer);
-                this.peers[peer.index].init(this.torrent, this.writeCallback, this.requested, this.downloaded);
+                this.peers[peer.index].init(this.torrent, this.writeCallback, this.requested, this.downloaded, this);
             });
         });
     }
 
-    search(x) {
+    searchFile(x, this_) {
         // binary search the files
         let l = 0;
-        let r = files.length-1;
+        let r = this_.files.length-1;
         let m;
 
         while(l < r) {
             m = l+Math.floor((r-l)/2);
             
-            if(this.files[m].start > x)
+            if(this_.files[m].start > x)
                 r = m-1;
-            else if(this.files[m].end < x)
+            else if(this_.files[m].end < x)
                 l = m+1;
             else {
                 l = m;
@@ -112,22 +123,27 @@ class Torrent {
         return l;
     }   
 
-    writeCallback(block) {
+    writeCallback(block, this_) {
         // write the pieces to the disk and clear the piece from the array
         // handles slicing the pieces according to the files
         // TODO binary search for the file in a loop and write bytes seperately for each file from a piece
         // write the data to filesystem-synchronous way
         // split the data based on file_size's
         // TODO handle addition of extra peers
+        // this_ is the "this" operator of actual torrent class
+        // https://stackoverflow.com/questions/3541348/javascript-how-do-you-call-a-function-inside-a-class-from-within-that-class
 
-        let offset = block.pieceIndex*this.torrent.info['piece length']+block.begin;
+        let offset = block.pieceIndex*this_.pieceLength+block.begin;
         let fileIndex = 0;
         let length = 0;
         let file = null;
+
+        console.log("block: ", block);
+        console.log("offset: ", offset);
         while(block.data.length) {
             // select the file to write
-            fileIndex = search(offset);
-            file = this.files[fileIndex];
+            fileIndex = this_.searchFile(offset, this_);
+            file = this_.files[fileIndex];
             length = (block.data.length > (file.end-file.start+1))? (file.end-file.start+1): block.data.length;
 
             file.write(offset-file.start, block.data.slice(0, length));
@@ -137,13 +153,13 @@ class Torrent {
 
 
         // handle dropped connections here
-        this.piecesDownloaded++;
-        if(this.piecesDownloaded === this.nPieces) {
-            this.end();
+        this_.piecesDownloaded++;
+        if(this_.piecesDownloaded === this_.nPieces) {
+            this_.end();
             return null;
         }
-        else if(this.peers[piece.peerIndex].busy === false) {
-            this.peers[piece.peerIndex].download();
+        else if(this_.peers[block.peerIndex].busy === false) {
+            this_.peers[block.peerIndex].download();
         }
     }
 

@@ -13,13 +13,15 @@ const PIECE = 9;
 const CANCEL = 10;
 const PORT = 11;
 
+
 class Message {
     constructor(msg) {
+        this.id = null;
         this.parse(msg);
     }
 
     msgClass(id) {
-        return (id == 0)? CHOKE: (id == 1)? UNCHAOKE: (id == 2)? INTERESTED: (id == 3)? NOT_INTERESTED: (id == 4)? HAVE: (id == 5)? BIT_FIELD: (id == 6)? REQUEST: (id == 7)? PIECE: (id == 8)? CANCEL: PORT; 
+        return (id == 0)? CHOKE: (id == 1)? UNCHOKE: (id == 2)? INTERESTED: (id == 3)? NOT_INTERESTED: (id == 4)? HAVE: (id == 5)? BIT_FIELD: (id == 6)? REQUEST: (id == 7)? PIECE: (id == 8)? CANCEL: PORT; 
     }
 
     isHandshake(msg) {
@@ -36,14 +38,14 @@ class Message {
         this.id = msg.length == 4? KEEP_ALIVE: this.msgClass(msg.readInt8(4));
         this.payload = msg.length > 5 ? msg.slice(5) : null;
 
-        if(id == HAVE) {
+        if(this.id == HAVE) {
             this.payload = {
                 pieceIndex: this.payload.readInt32BE(0)
             };
         }
         else if (this.id === REQUEST || this.id === PIECE || this.id === CANCEL) {
             const rest = this.payload.slice(8);
-        
+
             this.payload = {
                 index: this.payload.readInt32BE(0),
                 begin: this.payload.readInt32BE(4)
